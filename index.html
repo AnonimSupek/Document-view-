@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Penampil Dokumen</title>
+<style>
+:root{--bg:#e5e7eb;--fg:#111827;--card:#fff;--mut:#6b7280;--bar:#1f2937;--acc:#2563eb;--bd:#cbd5e1;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1220;--fg:#e5e7eb;--card:#1e293b;--mut:#94a3b8;--bar:#020617;--acc:#60a5fa;--bd:#334155;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b1220;--fg:#e5e7eb;--card:#1e293b;--mut:#94a3b8;--bar:#020617;--acc:#60a5fa;--bd:#334155;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bar);color:#fff}
+header h1{font-size:17px;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+header label{background:var(--acc);color:#fff;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;flex:none}
+header input{display:none}
+#msg{margin:16px;padding:32px 18px;text-align:center;background:var(--card);border:2px dashed var(--bd);border-radius:12px;white-space:pre-line;color:var(--mut)}
+#msg input,#msg button{font-size:16px;padding:8px 12px;margin:6px 0}
+.pg{margin:6px auto;background:#fff;overflow:hidden;max-width:900px}
+.pg canvas{display:block}
+pre.txt{margin:0;padding:14px;background:var(--card);white-space:pre-wrap;word-break:break-word;font-size:14px;min-height:60vh}
+img.full{display:block;max-width:100%;margin:8px auto;border-radius:4px}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:8px;background:var(--bar)}
+.tabs button{flex:none;padding:6px 12px;border:0;border-radius:6px;background:#374151;color:#fff;font-size:14px}
+.tabs button.on{background:var(--acc)}
+.tw{overflow:auto;background:var(--card)}
+.tw table{border-collapse:collapse;font-size:13px}
+.tw td,.tw th{border:1px solid var(--bd);padding:3px 8px;white-space:pre;vertical-align:top}
+.note{padding:8px 14px;background:#fef3c7;color:#78350f;font-size:13px}
+.slide{background:var(--card);margin:8px;padding:12px;border-radius:8px}
+.slide h4{margin:0 0 6px;color:var(--acc);font-size:13px}
+.slide p{margin:4px 0}
+iframe.h{width:100%;border:0;background:#fff;height:85vh}
+.docx-wrapper{background:var(--bg)!important;padding:8px!important}
+</style></head>
+<body>
+<header><h1 id="ttl">Penampil Dokumen</h1><label>Pilih dokumen<input id="f" type="file"></label></header>
+<div id="out"></div>
+<script>
+const out=document.getElementById('out'),CDN='https://cdn.jsdelivr.net/npm/';
+const LIB={pdf:CDN+'pdfjs-dist@3.11.174/legacy/build/pdf.min.js',zip:CDN+'jszip@3.10.1/dist/jszip.min.js',docx:CDN+'docx-preview@0.3.3/dist/docx-preview.min.js',xlsx:CDN+'xlsx@0.18.5/dist/xlsx.full.min.js'};
+const P={};
+const load=k=>P[k]||(P[k]=new Promise((r,j)=>{const s=document.createElement('script');s.src=LIB[k];s.onload=r;s.onerror=()=>j(new Error('Gagal memuat pustaka, periksa koneksi internet'));document.head.appendChild(s)}));
+const IMG={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp',bmp:'image/bmp',svg:'image/svg+xml',avif:'image/avif',ico:'image/x-icon'};
+const HINT='Pilih dokumen dengan tombol di atas, atau seret file ke halaman ini.\n\nDidukung: PDF, Word (docx), Excel (xlsx, xls, csv, ods), PowerPoint (pptx), OpenDocument (odt, odp), RTF, HTML, teks/kode, dan gambar.\n\nFile diproses di perangkat Anda dan tidak diunggah ke mana pun.';
+function msg(t){out.innerHTML='';const d=document.createElement('div');d.id='msg';d.textContent=t;out.appendChild(d);return d}
+function note(t){const n=document.createElement('div');n.className='note';n.textContent=t;out.appendChild(n)}
+function showText(t,n){out.innerHTML='';if(n)note(n);const p=document.createElement('pre');p.className='txt';p.textContent=t.length>1500000?t.slice(0,1500000)+'\n\n… (dipotong)':t;out.appendChild(p)}
+function addImg(box,src){const i=document.createElement('img');i.className='full';i.src=src;box.appendChild(i)}
+const dataURL=f=>new Promise((r,j)=>{const x=new FileReader();x.onload=()=>r(x.result);x.onerror=()=>j(new Error('Gagal membaca file'));x.readAsDataURL(f)});
+const numOf=n=>+((n.match(/(\d+)\.\w+$/)||[0,0])[1]);
+async function zipImg(z,path){const f=z.file(path),e=path.split('.').pop().toLowerCase();if(!f||!IMG[e])return null;return 'data:'+IMG[e]+';base64,'+await f.async('base64')}
+async function gallery(z,re,title){
+  const ns=Object.keys(z.files).filter(n=>re.test(n)&&/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(n)).sort();
+  if(!ns.length)return;
+  const b=document.createElement('div');b.className='slide';
+  const h=document.createElement('h4');h.textContent=title+' ('+ns.length+')';b.appendChild(h);
+  for(const n of ns.slice(0,60)){const u=await zipImg(z,n);if(u)addImg(b,u)}
+  out.appendChild(b);
+}
+function paras(xml,names){const d=new DOMParser().parseFromString(xml,'application/xml'),r=[];for(const e of d.getElementsByTagNameNS('*','*'))if(names.includes(e.localName))r.push(e.textContent);return r}
+
+async function viewPdf(buf){
+  await load('pdf');
+  pdfjsLib.GlobalWorkerOptions.workerSrc=CDN+'pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js';
+  const task=pdfjsLib.getDocument({data:new Uint8Array(buf)});
+  task.onPassword=(up,why)=>{
+    const d=msg(why===2?'Kata sandi salah, coba lagi.':'PDF ini dilindungi kata sandi.');
+    d.insertAdjacentHTML('beforeend','<br><input type="password" placeholder="Kata sandi"> <button>Buka</button>');
+    d.querySelector('button').onclick=()=>up(d.querySelector('input').value);
+  };
+  const pdf=await task.promise;out.innerHTML='';
+  const v1=(await pdf.getPage(1)).getViewport({scale:1}),ratio=v1.height/v1.width,W=()=>Math.min(out.clientWidth,900);
+  async function draw(d){
+    if(d.dataset.done)return;d.dataset.done=1;
+    const pg=await pdf.getPage(+d.dataset.n),vp=pg.getViewport({scale:1}),v=pg.getViewport({scale:W()/vp.width*Math.min(devicePixelRatio||1,2)});
+    const c=document.createElement('canvas');c.width=v.width;c.height=v.height;c.style.width='100%';c.style.height='auto';
+    d.style.height='auto';d.appendChild(c);
+    await pg.render({canvasContext:c.getContext('2d'),viewport:v}).promise;
+  }
+  const obs=new IntersectionObserver(es=>es.forEach(e=>{
+    const d=e.target;
+    if(e.isIntersecting)draw(d).catch(()=>{});
+    else if(d.dataset.done){d.style.height=d.clientHeight+'px';d.innerHTML='';delete d.dataset.done}
+  }),{rootMargin:'700px 0px'});
+  for(let i=1;i<=pdf.numPages;i++){const d=document.createElement('div');d.className='pg';d.dataset.n=i;d.style.height=W()*ratio+'px';out.appendChild(d);obs.observe(d)}
+}
+async function viewDocx(buf){
+  await load('zip');await load('docx');out.innerHTML='';
+  const c=document.createElement('div');out.appendChild(c);
+  await docx.renderAsync(buf,c,null,{inWrapper:true,breakPages:true,ignoreLastRenderedPageBreak:true,useBase64URL:true});
+  const sw=c.scrollWidth;if(sw>innerWidth)c.style.zoom=innerWidth/sw;
+}
+async function viewSheet(buf,ext){
+  await load('xlsx');
+  const wb=(ext==='csv'||ext==='tsv')?XLSX.read(new TextDecoder().decode(buf),{type:'string'}):XLSX.read(buf,{type:'array'});
+  if(!wb.SheetNames.length){msg('Tidak ada lembar di file ini.');return}
+  out.innerHTML='';
+  const tabs=document.createElement('div'),body=document.createElement('div'),bs=[];
+  tabs.className='tabs';body.className='tw';out.append(tabs,body);
+  function show(i){
+    bs.forEach((b,k)=>b.classList.toggle('on',k===i));
+    const ws=wb.Sheets[wb.SheetNames[i]];let n='';
+    if(ws['!ref']){const r=XLSX.utils.decode_range(ws['!ref']);if(r.e.r>3000){r.e.r=3000;ws['!ref']=XLSX.utils.encode_range(r);n='<div class="note">Menampilkan 3000 baris pertama.</div>'}}
+    body.innerHTML=n+XLSX.utils.sheet_to_html(ws);
+  }
+  wb.SheetNames.forEach((n,i)=>{const b=document.createElement('button');b.textContent=n;b.onclick=()=>show(i);tabs.appendChild(b);bs.push(b)});
+  show(0);
+  if(ext==='xlsx'||ext==='xlsm'){try{await load('zip');await gallery(await JSZip.loadAsync(buf),/^xl\/media\//,'Gambar di file ini')}catch(e){}}
+}
+async function viewPptx(buf){
+  await load('zip');
+  const z=await JSZip.loadAsync(buf),fs=Object.keys(z.files).filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a,b)=>numOf(a)-numOf(b));
+  if(!fs.length)throw new Error('Bukan file PowerPoint yang valid');
+  out.innerHTML='';note('Pratinjau teks dan gambar per slide (tata letak asli tidak ditampilkan).');
+  let i=0;
+  for(const f of fs){
+    const card=document.createElement('div');card.className='slide';
+    const h=document.createElement('h4');h.textContent='Slide '+(++i);card.appendChild(h);
+    paras(await z.file(f).async('string'),['p']).filter(t=>t.trim()).forEach(t=>{const p=document.createElement('p');p.textContent=t;card.appendChild(p)});
+    const rel=z.file('ppt/slides/_rels/slide'+numOf(f)+'.xml.rels');
+    if(rel){for(const m of (await rel.async('string')).matchAll(/Target="([^"]+)"/g)){if(/media\//.test(m[1])){const u=await zipImg(z,'ppt/media/'+m[1].split('/').pop());if(u)addImg(card,u)}}}
+    out.appendChild(card);
+  }
+}
+async function viewOdf(buf){
+  await load('zip');
+  const z=await JSZip.loadAsync(buf),f=z.file('content.xml');
+  if(!f)throw new Error('Bukan file OpenDocument yang valid');
+  showText(paras(await f.async('string'),['p','h']).join('\n\n'),'Teks dan gambar ditampilkan terpisah.');
+  await gallery(z,/^Pictures\//,'Gambar');
+}
+function viewRtf(buf){
+  let s=new TextDecoder('latin1').decode(buf);
+  s=s.replace(/\{\\\*[^{}]*\}/g,'').replace(/\\par[d]?/g,'\n').replace(/\\'([0-9a-fA-F]{2})/g,(m,h)=>String.fromCharCode(parseInt(h,16))).replace(/\\u(-?\d+)\??/g,(m,n)=>String.fromCharCode(n<0?+n+65536:+n)).replace(/\\[a-zA-Z]+-?\d* ?/g,'').replace(/[{}]/g,'');
+  showText(s.trim(),'Pratinjau teks saja.');
+}
+function viewHtml(buf){out.innerHTML='';const f=document.createElement('iframe');f.className='h';f.setAttribute('sandbox','');f.srcdoc=new TextDecoder().decode(buf);out.appendChild(f)}
+function viewPlain(buf,ext){
+  const h=new Uint8Array(buf.slice(0,4000));let z=0;for(const b of h)if(b===0)z++;
+  if(z>10){msg('Format file ini (.'+ext+') belum didukung.');return}
+  showText(new TextDecoder('utf-8').decode(buf));
+}
+const SHEET=new Set(['xlsx','xlsm','xlsb','xls','xlt','xltx','csv','tsv','ods','fods','numbers']);
+async function openFile(file){
+  document.getElementById('ttl').textContent=file.name;
+  const ext=file.name.split('.').pop().toLowerCase();msg('Membuka…');
+  try{
+    if(IMG[ext]||file.type.startsWith('image/')){out.innerHTML='';addImg(out,await dataURL(file));return}
+    const buf=await file.arrayBuffer();
+    if(ext==='pdf')await viewPdf(buf);
+    else if(['docx','docm','dotx','dotm'].includes(ext))await viewDocx(buf);
+    else if(SHEET.has(ext))await viewSheet(buf,ext);
+    else if(['pptx','pptm','ppsx','potx'].includes(ext))await viewPptx(buf);
+    else if(['odt','ott','odp','otp'].includes(ext))await viewOdf(buf);
+    else if(ext==='rtf')viewRtf(buf);
+    else if(['html','htm','xhtml'].includes(ext))viewHtml(buf);
+    else if(['doc','dot','ppt','pps','pot'].includes(ext))msg('Format lama (.'+ext+') tidak didukung di versi web.\nSimpan ulang sebagai .'+ext+'x di Word atau PowerPoint, lalu buka lagi.');
+    else viewPlain(buf,ext);
+  }catch(e){msg('Gagal membuka file:\n'+e.message)}
+}
+document.getElementById('f').onchange=e=>{if(e.target.files[0])openFile(e.target.files[0])};
+addEventListener('dragover',e=>e.preventDefault());
+addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer.files[0])openFile(e.dataTransfer.files[0])});
+msg(HINT);
+</script></body></html>
