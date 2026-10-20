@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="id"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f2937">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Penampil Dokumen</title>
 <style>
 :root{--bg:#e5e7eb;--fg:#111827;--card:#fff;--mut:#6b7280;--bar:#1f2937;--acc:#2563eb;--bd:#cbd5e1;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -41,7 +44,7 @@ const LIB={pdf:CDN+'pdfjs-dist@3.11.174/legacy/build/pdf.min.js',zip:CDN+'jszip@
 const P={};
 const load=k=>P[k]||(P[k]=new Promise((r,j)=>{const s=document.createElement('script');s.src=LIB[k];s.onload=r;s.onerror=()=>j(new Error('Gagal memuat pustaka, periksa koneksi internet'));document.head.appendChild(s)}));
 const IMG={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp',bmp:'image/bmp',svg:'image/svg+xml',avif:'image/avif',ico:'image/x-icon'};
-const HINT='Pilih dokumen dengan tombol di atas, atau seret file ke halaman ini.\n\nDidukung: PDF, Word (docx), Excel (xlsx, xls, csv, ods), PowerPoint (pptx), OpenDocument (odt, odp), RTF, HTML, teks/kode, dan gambar.\n\nFile diproses di perangkat Anda dan tidak diunggah ke mana pun.';
+const HINT='Pilih dokumen dengan tombol di atas, atau seret file ke halaman ini.\n\nDidukung: PDF, Word (doc, docx), Excel (xlsx, xls, csv, ods), PowerPoint (ppt, pptx), OpenDocument (odt, odp), RTF, HTML, teks/kode, dan gambar.\n\nFile diproses di perangkat Anda dan tidak diunggah ke mana pun.';
 function msg(t){out.innerHTML='';const d=document.createElement('div');d.id='msg';d.textContent=t;out.appendChild(d);return d}
 function note(t){const n=document.createElement('div');n.className='note';n.textContent=t;out.appendChild(n)}
 function showText(t,n){out.innerHTML='';if(n)note(n);const p=document.createElement('pre');p.className='txt';p.textContent=t.length>1500000?t.slice(0,1500000)+'\n\n… (dipotong)':t;out.appendChild(p)}
@@ -107,19 +110,139 @@ async function viewSheet(buf,ext){
   show(0);
   if(ext==='xlsx'||ext==='xlsm'){try{await load('zip');await gallery(await JSZip.loadAsync(buf),/^xl\/media\//,'Gambar di file ini')}catch(e){}}
 }
+async function textSlide(z,f){
+  const card=document.createElement('div');card.style.padding='12px';
+  paras(await z.file(f).async('string'),['p']).filter(t=>t.trim()).forEach(t=>{const p=document.createElement('p');p.textContent=t;card.appendChild(p)});
+  const rel=z.file(f.replace('slides/','slides/_rels/')+'.rels');
+  if(rel){for(const m of (await rel.async('string')).matchAll(/Target="([^"]+)"/g)){if(/media\//.test(m[1])){const u=await zipImg(z,'ppt/media/'+m[1].split('/').pop());if(u)addImg(card,u)}}}
+  return card;
+}
+async function renderSlide(z,f,cx,cy,W,sc){
+  const xml=new DOMParser().parseFromString(await z.file(f).async('string'),'application/xml');
+  const rels={},rf=z.file(f.replace('slides/','slides/_rels/')+'.rels');
+  if(rf){const rx=new DOMParser().parseFromString(await rf.async('string'),'application/xml');for(const r of rx.getElementsByTagName('Relationship'))rels[r.getAttribute('Id')]=r.getAttribute('Target')}
+  const d=document.createElement('div');
+  d.style.cssText='position:relative;overflow:hidden;width:'+W+'px;height:'+(W*cy/cx)+'px;margin:0 auto;background:#fff';
+  let dark=false;
+  const bg=xml.getElementsByTagNameNS('*','bg')[0];
+  if(bg){const c=bg.getElementsByTagNameNS('*','srgbClr')[0];if(c){const h=c.getAttribute('val');d.style.background='#'+h;const n=parseInt(h,16);dark=(((n>>16)&255)*.3+((n>>8)&255)*.59+(n&255)*.11)<110}}
+  const tree=xml.getElementsByTagNameNS('*','spTree')[0];
+  if(!tree)throw new Error('slide kosong');
+  let fy=cy*.05;
+  for(const el of tree.getElementsByTagNameNS('*','*')){
+    if(el.localName!=='sp'&&el.localName!=='pic')continue;
+    const xf=el.getElementsByTagNameNS('*','xfrm')[0];
+    let x,y,w,h;
+    const off=xf&&xf.getElementsByTagNameNS('*','off')[0],ext=xf&&xf.getElementsByTagNameNS('*','ext')[0];
+    if(off&&ext){x=+off.getAttribute('x');y=+off.getAttribute('y');w=+ext.getAttribute('cx');h=+ext.getAttribute('cy')}
+    else{x=cx*.05;y=fy;w=cx*.9;h=cy*.15;fy+=cy*.17}
+    const b=document.createElement('div');
+    b.style.cssText='position:absolute;left:'+x/cx*100+'%;top:'+y/cy*100+'%;width:'+w/cx*100+'%;height:'+h/cy*100+'%;box-sizing:border-box';
+    if(el.localName==='pic'){
+      const bl=el.getElementsByTagNameNS('*','blip')[0],rid=bl&&(bl.getAttribute('r:embed')||bl.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','embed'));
+      const u=rid&&rels[rid]?await zipImg(z,'ppt/media/'+rels[rid].split('/').pop()):null;
+      if(!u)continue;
+      const im=document.createElement('img');im.src=u;im.style.cssText='width:100%;height:100%;object-fit:fill';b.appendChild(im);d.appendChild(b);continue;
+    }
+    const sp=el.getElementsByTagNameNS('*','spPr')[0];
+    if(sp)for(const c of sp.children){if(c.localName==='solidFill'){const k=c.getElementsByTagNameNS('*','srgbClr')[0];if(k)b.style.background='#'+k.getAttribute('val')}}
+    for(const pe of el.getElementsByTagNameNS('*','p')){
+      const pd=document.createElement('div'),pp=pe.getElementsByTagNameNS('*','pPr')[0];
+      const al=pp&&pp.getAttribute('algn');
+      pd.style.textAlign=al==='ctr'?'center':al==='r'?'right':al==='just'?'justify':'left';
+      let any=false,last=18;
+      for(const n of pe.children){
+        if(n.localName==='br'){pd.appendChild(document.createElement('br'));continue}
+        if(n.localName!=='r'&&n.localName!=='fld')continue;
+        const t=n.getElementsByTagNameNS('*','t')[0];if(!t)continue;
+        const rp=n.getElementsByTagNameNS('*','rPr')[0],sp2=document.createElement('span');
+        sp2.textContent=t.textContent;any=true;
+        let sz=rp&&rp.getAttribute('sz');sz=sz?+sz/100:18;last=sz;
+        sp2.style.fontSize=Math.max(6,sz*sc)+'px';
+        if(rp&&rp.getAttribute('b')==='1')sp2.style.fontWeight='bold';
+        if(rp&&rp.getAttribute('i')==='1')sp2.style.fontStyle='italic';
+        const k=rp&&rp.getElementsByTagNameNS('*','srgbClr')[0];
+        sp2.style.color=k?'#'+k.getAttribute('val'):(dark?'#fff':'#111');
+        pd.appendChild(sp2);
+      }
+      if(!any){pd.style.height=Math.max(6,last*sc)+'px'}
+      pd.style.lineHeight='1.2';b.appendChild(pd);
+    }
+    d.appendChild(b);
+  }
+  return d;
+}
 async function viewPptx(buf){
   await load('zip');
   const z=await JSZip.loadAsync(buf),fs=Object.keys(z.files).filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a,b)=>numOf(a)-numOf(b));
-  if(!fs.length)throw new Error('Bukan file PowerPoint yang valid');
-  out.innerHTML='';note('Pratinjau teks dan gambar per slide (tata letak asli tidak ditampilkan).');
+  if(!fs.length)throw new Error('Tidak ada slide di file ini (mungkin bukan file .pptx yang asli)');
+  let cx=9144000,cy=5143500;
+  try{const m=(await z.file('ppt/presentation.xml').async('string')).match(/<p:sldSz[^>]*?cx="(\d+)"[^>]*?cy="(\d+)"/);if(m){cx=+m[1];cy=+m[2]}}catch(e){}
+  out.innerHTML='';note('Tampilan slide disederhanakan: font, animasi, dan beberapa efek tidak ditampilkan.');
+  const W=Math.max(240,Math.min(out.clientWidth-16,900)),sc=W/(cx/12700);
   let i=0;
   for(const f of fs){
-    const card=document.createElement('div');card.className='slide';
+    const card=document.createElement('div');card.className='slide';card.style.padding='6px';
     const h=document.createElement('h4');h.textContent='Slide '+(++i);card.appendChild(h);
-    paras(await z.file(f).async('string'),['p']).filter(t=>t.trim()).forEach(t=>{const p=document.createElement('p');p.textContent=t;card.appendChild(p)});
-    const rel=z.file('ppt/slides/_rels/slide'+numOf(f)+'.xml.rels');
-    if(rel){for(const m of (await rel.async('string')).matchAll(/Target="([^"]+)"/g)){if(/media\//.test(m[1])){const u=await zipImg(z,'ppt/media/'+m[1].split('/').pop());if(u)addImg(card,u)}}}
+    try{card.appendChild(await renderSlide(z,f,cx,cy,W,sc))}catch(e){card.appendChild(await textSlide(z,f))}
     out.appendChild(card);
+  }
+}
+function pptText(buf){
+  const b=new Uint8Array(buf),n=b.length,r=[];
+  for(let i=0;i<n-8;i++){
+    if(b[i]===0&&b[i+1]===0&&b[i+3]===0x0F&&(b[i+2]===0xA0||b[i+2]===0xA8)){
+      const len=(b[i+4]|(b[i+5]<<8)|(b[i+6]<<16))>>>0;
+      if(len>0&&len<100000&&i+8+len<=n){
+        let t='';
+        if(b[i+2]===0xA0){for(let k=0;k+1<len;k+=2)t+=String.fromCharCode(b[i+8+k]|(b[i+9+k]<<8))}
+        else for(let k=0;k<len;k++)t+=String.fromCharCode(b[i+8+k]);
+        t=t.replace(/[\r\x0b]/g,'\n').trim();
+        if(/[A-Za-z0-9]/.test(t))r.push(t);
+        i+=7+len;
+      }
+    }
+  }
+  return r.join('\n\n');
+}
+function scrapeText(buf){
+  const b=new Uint8Array(buf),n=b.length;
+  const ok=c=>c===9||c===10||c===13||(c>=32&&c<=126)||(c>=160&&c<=591)||(c>=1024&&c<=1279);
+  let U='',run='',i=0;
+  while(i+1<n&&U.length<1e6){const c=b[i]|(b[i+1]<<8);if(ok(c)){run+=String.fromCharCode(c);i+=2}else{if(run.length>=8)U+=run+'\n';run='';i++}}
+  if(run.length>=8)U+=run;
+  let A='';run='';
+  for(let k=0;k<n&&A.length<1e6;k++){const c=b[k];if(c===9||c===10||c===13||(c>=32&&c<=126))run+=String.fromCharCode(c);else{if(run.length>=8)A+=run+'\n';run=''}}
+  if(run.length>=8)A+=run;
+  return U.length>=A.length?U:A;
+}
+function scrapeImages(buf){
+  const b=new Uint8Array(buf),n=b.length,res=[];let i=0,tot=0;
+  const at=(p,v)=>p<n&&b[p]===v;
+  while(i<n-12&&res.length<60&&tot<4e7){
+    let end=-1,mime='';
+    if(at(i,0x89)&&at(i+1,0x50)&&at(i+2,0x4E)&&at(i+3,0x47)&&at(i+4,0x0D)&&at(i+5,0x0A)&&at(i+6,0x1A)&&at(i+7,0x0A)){
+      for(let j=i+8;j<n-8;j++)if(at(j,0x49)&&at(j+1,0x45)&&at(j+2,0x4E)&&at(j+3,0x44)){end=Math.min(n,j+8);break}
+      mime='image/png';
+    }else if(at(i,0xFF)&&at(i+1,0xD8)&&at(i+2,0xFF)){
+      for(let j=i+3;j<n-1;j++)if(at(j,0xFF)&&at(j+1,0xD9)){const nb=j+3<n?b[j+3]:0;if(!(at(j+2,0xFF)&&nb>=0xC0&&nb<=0xFE)){end=j+2;break}}
+      mime='image/jpeg';
+    }
+    if(end>0&&end-i>=3000){res.push(new Blob([b.subarray(i,end)],{type:mime}));tot+=end-i;i=end}else i++;
+  }
+  return res;
+}
+async function viewOld(buf,ext){
+  out.innerHTML='';note('Format lama (.'+ext+'): teks dan gambar ditampilkan terpisah, tata letak asli tidak tersedia.');
+  let t=(ext==='ppt'||ext==='pps'||ext==='pot')?pptText(buf):'';
+  if(!t.trim())t=scrapeText(buf);
+  const p=document.createElement('pre');p.className='txt';p.textContent=(t.trim()||'(Tidak ada teks yang bisa dibaca.)').slice(0,1500000);out.appendChild(p);
+  const imgs=scrapeImages(buf);
+  if(imgs.length){
+    const bx=document.createElement('div');bx.className='slide';
+    const h=document.createElement('h4');h.textContent='Gambar ('+imgs.length+')';bx.appendChild(h);
+    for(const g of imgs)addImg(bx,await dataURL(g));
+    out.appendChild(bx);
   }
 }
 async function viewOdf(buf){
@@ -154,7 +277,7 @@ async function openFile(file){
     else if(['odt','ott','odp','otp'].includes(ext))await viewOdf(buf);
     else if(ext==='rtf')viewRtf(buf);
     else if(['html','htm','xhtml'].includes(ext))viewHtml(buf);
-    else if(['doc','dot','ppt','pps','pot'].includes(ext))msg('Format lama (.'+ext+') tidak didukung di versi web.\nSimpan ulang sebagai .'+ext+'x di Word atau PowerPoint, lalu buka lagi.');
+    else if(['doc','dot','ppt','pps','pot'].includes(ext))await viewOld(buf,ext);
     else viewPlain(buf,ext);
   }catch(e){msg('Gagal membuka file:\n'+e.message)}
 }
@@ -162,5 +285,6 @@ document.getElementById('f').onchange=e=>{if(e.target.files[0])openFile(e.target
 addEventListener('dragover',e=>e.preventDefault());
 addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer.files[0])openFile(e.dataTransfer.files[0])});
 document.head.insertAdjacentHTML('beforeend','<link rel="icon" href="data:image/svg+xml,'+encodeURIComponent(document.querySelector('.logo').outerHTML.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"'))+'">');
+if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 {const h=msg(HINT);h.style.cursor='pointer';h.onclick=()=>document.getElementById('f').click()}
 </script></body></html>
